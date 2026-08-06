@@ -9,13 +9,16 @@ The Go implementation is grouped by data path and responsibility:
 
 - `cgroup_abi.go`, `cgroup_policy.go`, and `cgroup_mount.go` contain portable
   ABI, policy compilation, and cgroup discovery logic.
-- `cgroup_cgo.go`, `cgroup_socket_cgo.go`, and `cgroup_policy_cgo.go` manage
-  the native cgroup runtime, socket redirect maps, and live policy maps.
+- `cgroup_backend_cgo.go`, `cgroup_socket_cgo.go`, and
+  `cgroup_policy_cgo.go` manage the native cgroup runtime, socket redirect
+  maps, and live policy maps.
 - `shared_network_abi.go` and `shared_network_policy.go` contain the portable
   TC map ABI and host-address policy compilation.
 - `shared_network_cgo.go`, `shared_network_flow_cgo.go`, and
   `shared_network_policy_cgo.go` manage the native TC runtime, flow maps, and
   live host-address maps.
+- `backend_cgo.go` contains memlock, capability-probe, and load-error helpers
+  shared by the cgroup and TC backends.
 - `map.go` contains the small BPF map syscall boundary shared by both data
   paths. Files ending in `_stub.go` preserve the same API when cgo is disabled.
 
