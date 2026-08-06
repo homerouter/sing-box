@@ -51,6 +51,7 @@ MAP(cgroup_uid_policy, struct sb_ebpf_uid_lpm_key, __u8, BPF_MAP_TYPE_LPM_TRIE);
 MAP(cgroup_bypass_ipv4, struct sb_ebpf_ipv4_cidr_lpm_key, __u8, BPF_MAP_TYPE_LPM_TRIE);
 MAP(cgroup_bypass_ipv6, struct sb_ebpf_ipv6_cidr_lpm_key, __u8, BPF_MAP_TYPE_LPM_TRIE);
 MAP(cgroup_ipv6_available, __u32, __u32, BPF_MAP_TYPE_ARRAY);
+MAP(cgroup_stats, __u32, __u64, BPF_MAP_TYPE_ARRAY);
 
 static void *(*map_lookup)(void *map, const void *key) = (void *)BPF_FUNC_map_lookup_elem;
 static long (*map_update)(void *map, const void *key, const void *value, __u64 flags) =
@@ -63,6 +64,11 @@ static __u64 (*ktime_get_ns)(void) = (void *)BPF_FUNC_ktime_get_ns;
 
 INLINE __u16 swap16(__u16 value) { return __builtin_bswap16(value); }
 INLINE __u32 swap32(__u32 value) { return __builtin_bswap32(value); }
+
+INLINE void increment_stat(__u32 key) {
+    __u64 *counter = map_lookup(&cgroup_stats, &key);
+    if (counter != 0) __sync_fetch_and_add(counter, 1U);
+}
 
 INLINE const struct sb_ebpf_cgroup_control *control(void) {
     __u32 key = 0U;
@@ -343,7 +349,9 @@ INLINE void flow_store(
         .last_seen_seconds = (__u32)(ktime_get_ns() / 1000000000ULL)};
     __builtin_memcpy(key.addr, address, sizeof(key.addr));
     if (listener != 0) __builtin_memcpy(&value.listener, listener, sizeof(value.listener));
-    map_update(&cgroup_udp_flow, &key, &value, 0U);
+    if (map_update(&cgroup_udp_flow, &key, &value, 0U) != 0) {
+        increment_stat(SB_EBPF_CGROUP_STAT_UDP_FLOW_UPDATE_FAILED);
+    }
 }
 
 INLINE bool restore_connected_token(
@@ -383,7 +391,9 @@ INLINE void store_udp_peer_v4(__u64 cookie, __u32 address, __u16 port) {
         .port = port,
     };
     __builtin_memcpy(peer.addr, &address, sizeof(address));
-    map_update(&cgroup_udp_peer, &cookie, &peer, 0U);
+    if (map_update(&cgroup_udp_peer, &cookie, &peer, 0U) != 0) {
+        increment_stat(SB_EBPF_CGROUP_STAT_UDP_PEER_UPDATE_FAILED);
+    }
 }
 
 INLINE void store_udp_peer_v6(__u64 cookie, const __u32 address[4], __u16 port) {
@@ -395,7 +405,9 @@ INLINE void store_udp_peer_v6(__u64 cookie, const __u32 address[4], __u16 port) 
         .port = port,
     };
     __builtin_memcpy(peer.addr, address, sizeof(peer.addr));
-    map_update(&cgroup_udp_peer, &cookie, &peer, 0U);
+    if (map_update(&cgroup_udp_peer, &cookie, &peer, 0U) != 0) {
+        increment_stat(SB_EBPF_CGROUP_STAT_UDP_PEER_UPDATE_FAILED);
+    }
 }
 
 INLINE bool restore_udp_peer_v4(__u64 cookie, __u32 *address, __u16 *port) {
@@ -483,10 +495,14 @@ INLINE int handle_v4(struct bpf_sock_addr *ctx, bool tgid_mode, bool connect_hoo
     struct sb_ebpf_listener_key listener = {0};
     struct sb_ebpf_original_dst original;
     original_v4(&original, protocol, port, destination, cookie, connected_udp);
-    if (!token_v4(config, &listener, &original, destination, protocol, cookie)) return 0;
+    if (!token_v4(config, &listener, &original, destination, protocol, cookie)) {
+        increment_stat(SB_EBPF_CGROUP_STAT_REDIRECT_RESERVATION_FAILED);
+        return 0;
+    }
     if (connected_udp) {
         if (cookie == 0U || map_update(&cgroup_udp_token, &cookie, &listener, 0U) != 0) {
             map_delete(&cgroup_udp_redirect, &listener);
+            increment_stat(SB_EBPF_CGROUP_STAT_CONNECTED_UDP_STATE_FAILED);
             return 0;
         }
     }
@@ -547,10 +563,14 @@ INLINE int handle_v6(
         struct sb_ebpf_listener_key listener = {0};
         struct sb_ebpf_original_dst original;
         original_v4(&original, protocol, port, destination, cookie, connected_udp);
-        if (!token_v4(config, &listener, &original, destination, protocol, cookie)) return 0;
+        if (!token_v4(config, &listener, &original, destination, protocol, cookie)) {
+            increment_stat(SB_EBPF_CGROUP_STAT_REDIRECT_RESERVATION_FAILED);
+            return 0;
+        }
         if (connected_udp &&
             (cookie == 0U || map_update(&cgroup_udp_token, &cookie, &listener, 0U) != 0)) {
             map_delete(&cgroup_udp_redirect, &listener);
+            increment_stat(SB_EBPF_CGROUP_STAT_CONNECTED_UDP_STATE_FAILED);
             return 0;
         }
         if (!connect_hook && protocol == UDP_VALUE) {
@@ -588,10 +608,14 @@ INLINE int handle_v6(
     struct sb_ebpf_listener_key listener = {0};
     struct sb_ebpf_original_dst original;
     original_v6(&original, protocol, port, address, cookie, connected_udp);
-    if (!token_v6(config, &listener, &original, address, protocol, cookie)) return 0;
+    if (!token_v6(config, &listener, &original, address, protocol, cookie)) {
+        increment_stat(SB_EBPF_CGROUP_STAT_REDIRECT_RESERVATION_FAILED);
+        return 0;
+    }
     if (connected_udp &&
         (cookie == 0U || map_update(&cgroup_udp_token, &cookie, &listener, 0U) != 0)) {
         map_delete(&cgroup_udp_redirect, &listener);
+        increment_stat(SB_EBPF_CGROUP_STAT_CONNECTED_UDP_STATE_FAILED);
         return 0;
     }
     if (!connect_hook && protocol == UDP_VALUE) {

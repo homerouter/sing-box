@@ -193,6 +193,7 @@ static int cgroup_object_map_fd(const char *name, void *context) {
         MAP_BINDING("cgroup_bypass_ipv4", bypass_ipv4_cidr_map_fd),
         MAP_BINDING("cgroup_bypass_ipv6", bypass_ipv6_cidr_map_fd),
         MAP_BINDING("cgroup_ipv6_available", ipv6_available_map_fd),
+        MAP_BINDING("cgroup_stats", stats_map_fd),
 #undef MAP_BINDING
     };
     return sb_ebpf_resolve_map_fd(name, context, bindings, ARRAY_SIZE(bindings));

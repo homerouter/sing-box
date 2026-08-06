@@ -307,6 +307,17 @@ The selected interface must expose Ethernet-like frames to TC. XDP, hardware
 flow offload, or vendor tethering offload that bypasses TC cannot be
 intercepted.
 
+### Runtime diagnostics
+
+When the Clash API is enabled, `GET /ebpf` returns diagnostic counters for
+each running eBPF inbound. Counters record only exceptional kernel paths such
+as redirect-state allocation, optional cache updates, and TC packet rewrite
+failures. They are read on request; sing-box does not periodically scan maps or
+log connection statistics.
+
+A non-zero counter indicates degraded or dropped traffic and should be
+included with the startup log when reporting a problem.
+
 ### Kernel requirements
 
 Use the included capability probe before deployment:

@@ -165,6 +165,12 @@ struct bpf_map_def SEC("maps") shared_scratch = {
     .value_size = sizeof(struct sb_shared_scratch),
     .max_entries = 1U,
 };
+struct bpf_map_def SEC("maps") shared_stats = {
+    .type = BPF_MAP_TYPE_ARRAY,
+    .key_size = sizeof(__u32),
+    .value_size = sizeof(__u64),
+    .max_entries = SB_SHARED_STAT_COUNT,
+};
 
 static void *(*map_lookup)(void *map, const void *key) = (void *)BPF_FUNC_map_lookup_elem;
 static long (*map_update)(void *map, const void *key, const void *value, __u64 flags) =
@@ -187,6 +193,11 @@ INLINE __u16 swap16(__u16 value) {
 
 INLINE __u32 swap32(__u32 value) {
     return __builtin_bswap32(value);
+}
+
+INLINE void increment_stat(__u32 key) {
+    __u64 *counter = map_lookup(&shared_stats, &key);
+    if (counter != 0) __sync_fetch_and_add(counter, 1U);
 }
 
 INLINE void copy_address(__u8 destination[16], const __u8 source[16], __u32 size) {
@@ -510,11 +521,13 @@ INLINE void cache_bypass(
     __builtin_memset(&scratch->bypass_flow, 0, sizeof(scratch->bypass_flow));
     scratch->bypass_flow.last_seen_ns = ktime_get_ns();
     if (protocol == IPPROTO_TCP_VALUE) scratch->bypass_flow.tcp_sequence = tcp_sequence;
-    map_update(
-        &shared_bypass_flow,
-        &scratch->original,
-        &scratch->bypass_flow,
-        BPF_ANY);
+    if (map_update(
+            &shared_bypass_flow,
+            &scratch->original,
+            &scratch->bypass_flow,
+            BPF_ANY) != 0) {
+        increment_stat(SB_SHARED_STAT_BYPASS_CACHE_UPDATE_FAILED);
+    }
 }
 
 INLINE __u64 checksum_flags(__u8 protocol, __u64 size) {
@@ -545,19 +558,24 @@ INLINE int rewrite_ipv4(
 		? __builtin_offsetof(struct tcp_header_min, checksum)
 		: __builtin_offsetof(struct udp_header_min, checksum));
 	__s64 address_diff = csum_diff(&old_address, 4U, &new_address, 4U, 0U);
-	if (address_diff < 0) return TC_ACT_SHOT;
+	if (address_diff < 0) {
+        increment_stat(SB_SHARED_STAT_PACKET_REWRITE_FAILED);
+        return TC_ACT_SHOT;
+    }
 	if (l3_csum_replace(
 			skb,
             l3_offset + __builtin_offsetof(struct ipv4_header, checksum),
             old_address,
             new_address,
 			4U) != 0) {
+		increment_stat(SB_SHARED_STAT_PACKET_REWRITE_FAILED);
 		return TC_ACT_SHOT;
 	}
 	if (l4_csum_replace(skb, checksum_offset, 0U, (__u64)address_diff, pseudo_header_checksum_flags(protocol, 0U)) != 0 ||
 		l4_csum_replace(skb, checksum_offset, old_port, new_port, checksum_flags(protocol, 2U)) != 0 ||
         skb_store_bytes(skb, address_offset, &new_address, sizeof(new_address), 0U) != 0 ||
         skb_store_bytes(skb, port_offset, &new_port, sizeof(new_port), 0U) != 0) {
+        increment_stat(SB_SHARED_STAT_PACKET_REWRITE_FAILED);
         return TC_ACT_SHOT;
     }
     return TC_ACT_OK;
@@ -582,7 +600,10 @@ INLINE int rewrite_ipv6(
         (const __be32 *)new_address,
         16U,
         0U);
-    if (address_diff < 0) return TC_ACT_SHOT;
+    if (address_diff < 0) {
+        increment_stat(SB_SHARED_STAT_PACKET_REWRITE_FAILED);
+        return TC_ACT_SHOT;
+    }
     __u32 address_offset = l3_offset + (source
         ? __builtin_offsetof(struct ipv6_header, source)
         : __builtin_offsetof(struct ipv6_header, destination));
@@ -591,6 +612,7 @@ INLINE int rewrite_ipv6(
         l4_csum_replace(skb, checksum_offset, old_port, new_port, checksum_flags(protocol, 2U)) != 0 ||
         skb_store_bytes(skb, address_offset, new_address, 16U, 0U) != 0 ||
         skb_store_bytes(skb, port_offset, &new_port, sizeof(new_port), 0U) != 0) {
+        increment_stat(SB_SHARED_STAT_PACKET_REWRITE_FAILED);
         return TC_ACT_SHOT;
     }
     return TC_ACT_OK;
@@ -630,7 +652,10 @@ NOINLINE int ingress_ipv4(
     __u16 destination_port = swap16(ports->destination);
     __u32 zero = 0U;
     struct sb_shared_scratch *scratch = map_lookup(&shared_scratch, &zero);
-    if (scratch == 0) return TC_ACT_SHOT;
+    if (scratch == 0) {
+        increment_stat(SB_SHARED_STAT_SCRATCH_LOOKUP_FAILED);
+        return TC_ACT_SHOT;
+    }
     __builtin_memset(&scratch->original, 0, sizeof(scratch->original));
     scratch->original.ifindex = skb->ifindex;
     scratch->original.family = AF_INET_VALUE;
@@ -683,7 +708,10 @@ NOINLINE int ingress_ipv4(
     destination_port = swap16(ports->destination);
 
     if (!cached) {
-        if (!reserve_token(scratch, control)) return TC_ACT_SHOT;
+        if (!reserve_token(scratch, control)) {
+            increment_stat(SB_SHARED_STAT_TOKEN_RESERVATION_FAILED);
+            return TC_ACT_SHOT;
+        }
     }
     __be32 token_address;
     __builtin_memcpy(&token_address, scratch->token.token_addr, 4U);
@@ -736,7 +764,10 @@ NOINLINE int egress_ipv4(
 
     __u32 zero = 0U;
     struct sb_shared_scratch *scratch = map_lookup(&shared_scratch, &zero);
-    if (scratch == 0) return TC_ACT_SHOT;
+    if (scratch == 0) {
+        increment_stat(SB_SHARED_STAT_SCRATCH_LOOKUP_FAILED);
+        return TC_ACT_SHOT;
+    }
     __builtin_memset(&scratch->reply_key, 0, sizeof(scratch->reply_key));
     scratch->reply_key.ifindex = skb->ifindex;
     scratch->reply_key.family = AF_INET_VALUE;
@@ -831,7 +862,10 @@ NOINLINE int ingress_ipv6(
     __u16 destination_port = swap16(destination_port_raw);
     __u32 zero = 0U;
     struct sb_shared_scratch *scratch = map_lookup(&shared_scratch, &zero);
-    if (scratch == 0) return TC_ACT_SHOT;
+    if (scratch == 0) {
+        increment_stat(SB_SHARED_STAT_SCRATCH_LOOKUP_FAILED);
+        return TC_ACT_SHOT;
+    }
     __builtin_memset(&scratch->original, 0, sizeof(scratch->original));
     scratch->original.ifindex = skb->ifindex;
     scratch->original.family = AF_INET6_VALUE;
@@ -890,7 +924,10 @@ NOINLINE int ingress_ipv6(
     destination_port = swap16(destination_port_raw);
 
     if (!cached) {
-        if (!reserve_token(scratch, control)) return TC_ACT_SHOT;
+        if (!reserve_token(scratch, control)) {
+            increment_stat(SB_SHARED_STAT_TOKEN_RESERVATION_FAILED);
+            return TC_ACT_SHOT;
+        }
     }
     return rewrite_ipv6(
         skb,
@@ -951,7 +988,10 @@ NOINLINE int egress_ipv6(
 
     __u32 zero = 0U;
     struct sb_shared_scratch *scratch = map_lookup(&shared_scratch, &zero);
-    if (scratch == 0) return TC_ACT_SHOT;
+    if (scratch == 0) {
+        increment_stat(SB_SHARED_STAT_SCRATCH_LOOKUP_FAILED);
+        return TC_ACT_SHOT;
+    }
     __builtin_memset(&scratch->reply_key, 0, sizeof(scratch->reply_key));
     scratch->reply_key.ifindex = skb->ifindex;
     scratch->reply_key.family = AF_INET6_VALUE;

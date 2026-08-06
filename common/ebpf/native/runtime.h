@@ -65,6 +65,7 @@ struct sb_ebpf_cgroup_runtime {
     int bypass_ipv4_cidr_map_fd;
     int bypass_ipv6_cidr_map_fd;
     int ipv6_available_map_fd;
+    int stats_map_fd;
     int program_fds[SB_EBPF_CGROUP_PROGRAM_COUNT];
     bool socket_release_supported;
     bool self_bypass_tgid;
@@ -97,6 +98,7 @@ struct sb_ebpf_shared_network_runtime {
     int fallback_bypass_ipv4_map_fd;
     int fallback_bypass_ipv6_map_fd;
     int scratch_map_fd;
+    int stats_map_fd;
     int ingress_prog_fd;
     int egress_prog_fd;
 };

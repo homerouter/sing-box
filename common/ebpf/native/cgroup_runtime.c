@@ -96,6 +96,9 @@ int sb_ebpf_cgroup_prepare(
         {"IPv6 availability", (enum bpf_map_type)SB_EBPF_ARRAY_MAP_TYPE,
          sizeof(uint32_t), sizeof(uint32_t), 1U,
          0U, &runtime->ipv6_available_map_fd},
+        {"diagnostic counters", (enum bpf_map_type)SB_EBPF_ARRAY_MAP_TYPE,
+         sizeof(uint32_t), sizeof(uint64_t), SB_EBPF_CGROUP_STAT_COUNT,
+         0U, &runtime->stats_map_fd},
     };
     const char *failed_map = NULL;
     if (sb_ebpf_create_maps(maps, ARRAY_SIZE(maps), &failed_map) != 0) {
@@ -222,6 +225,7 @@ int sb_ebpf_cgroup_close(struct sb_ebpf_cgroup_runtime *runtime) {
         }
     }
     int *runtime_fds[] = {
+        &runtime->stats_map_fd,
         &runtime->uid_policy_map_fd,
         &runtime->bypass_ipv6_cidr_map_fd,
         &runtime->ipv6_available_map_fd,

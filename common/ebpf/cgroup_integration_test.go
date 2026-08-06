@@ -173,6 +173,7 @@ func testCgroupBackendProgramLoad(t *testing.T, options cgroupProgramLoadOptions
 	if options.enableUDP && !backend.UsesSocketRelease() {
 		t.Log("kernel does not support cgroup/sock_release; UDP LRU fallback loaded successfully")
 	}
+	assertZeroDiagnosticCounters(t, backend.DiagnosticCounters)
 	if os.Getenv("SING_BOX_EBPF_INTEGRATION_ATTACH") == "1" {
 		if err = backend.Attach(); err != nil {
 			t.Fatal(err)
@@ -234,6 +235,7 @@ func prepareSharedNetworkProgramLoad(t *testing.T, cgroupBackend *CgroupBackend,
 	if sharedBackend.IngressProgramFD() < 0 || sharedBackend.EgressProgramFD() < 0 {
 		t.Fatal("shared-network token programs were not loaded")
 	}
+	assertZeroDiagnosticCounters(t, sharedBackend.DiagnosticCounters)
 	if hasDNSHijack := sharedBackend.control.Flags&sharedNetworkFlagDNSHijack != 0; hasDNSHijack != hijackDNS {
 		t.Fatalf("unexpected shared-network DNS hijack flag: %t", hasDNSHijack)
 	}
@@ -291,6 +293,22 @@ func prepareSharedNetworkProgramLoad(t *testing.T, cgroupBackend *CgroupBackend,
 		t.Fatal("shared-network backend was not disabled")
 	}
 	return sharedBackend
+}
+
+func assertZeroDiagnosticCounters(t *testing.T, read func() (map[string]uint64, error)) {
+	t.Helper()
+	counters, err := read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(counters) == 0 {
+		t.Fatal("missing eBPF diagnostic counters")
+	}
+	for name, value := range counters {
+		if value != 0 {
+			t.Fatalf("unexpected eBPF diagnostic counter %s=%d", name, value)
+		}
+	}
 }
 
 func TestCgroupBackendTrafficIntegration(t *testing.T) {

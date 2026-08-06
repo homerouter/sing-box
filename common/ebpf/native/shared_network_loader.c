@@ -23,6 +23,7 @@ struct shared_network_map_context {
     int bypass_ipv4_map_fd;
     int bypass_ipv6_map_fd;
     int scratch_map_fd;
+    int stats_map_fd;
 };
 
 static int shared_network_object_map_fd(const char *name, void *context) {
@@ -44,6 +45,7 @@ static int shared_network_object_map_fd(const char *name, void *context) {
         MAP_BINDING("shared_bypass_ipv4", bypass_ipv4_map_fd),
         MAP_BINDING("shared_bypass_ipv6", bypass_ipv6_map_fd),
         MAP_BINDING("shared_scratch", scratch_map_fd),
+        MAP_BINDING("shared_stats", stats_map_fd),
 #undef MAP_BINDING
     };
     return sb_ebpf_resolve_map_fd(
@@ -94,6 +96,7 @@ int sb_ebpf_load_shared_network_programs(
         .bypass_ipv4_map_fd = bypass_ipv4_map_fd,
         .bypass_ipv6_map_fd = bypass_ipv6_map_fd,
         .scratch_map_fd = runtime->scratch_map_fd,
+        .stats_map_fd = runtime->stats_map_fd,
     };
     for (size_t index = 0U;
          index < sizeof(shared_network_programs) / sizeof(shared_network_programs[0]);

@@ -46,5 +46,8 @@ func (b *SharedNetworkBackend) SetBypassCIDRState([]netip.Prefix) error {
 	return unsupportedSharedNetworkError()
 }
 func (b *SharedNetworkBackend) BypassCIDRCount() (int, int) { return 0, 0 }
-func (b *SharedNetworkBackend) Close() error                { return nil }
-func (b *SharedNetworkBackend) IsClosed() bool              { return true }
+func (b *SharedNetworkBackend) DiagnosticCounters() (map[string]uint64, error) {
+	return nil, unsupportedSharedNetworkError()
+}
+func (b *SharedNetworkBackend) Close() error   { return nil }
+func (b *SharedNetworkBackend) IsClosed() bool { return true }

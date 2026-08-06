@@ -39,6 +39,10 @@ func (b *CgroupBackend) BypassCIDRCount() (int, int) {
 	return 0, 0
 }
 
+func (b *CgroupBackend) DiagnosticCounters() (map[string]uint64, error) {
+	return nil, E.New("eBPF inbound is not supported by this build: cgo is disabled")
+}
+
 func (b *CgroupBackend) CgroupPath() string {
 	return ""
 }
