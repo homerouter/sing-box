@@ -24,10 +24,11 @@
 #define TCP_FLAG_SYN 0x0002U
 #define TCP_FLAG_ACK 0x0010U
 
-/* Bound old-verifier offsets for Ethernet, two VLAN tags, IPv6, and three extension headers. */
+/* Bound old-verifier offsets for Ethernet, two VLAN tags, IPv6, and eight extension headers. */
+#define IPV6_MAX_EXTENSION_HEADERS 8U
 #define IPV6_TRANSPORT_MIN_OFFSET 54U
-#define IPV6_TRANSPORT_MAX_OFFSET 6206U
-#define IPV6_TRANSPORT_MASK 0x1fffU
+#define IPV6_TRANSPORT_MAX_OFFSET 16446U
+#define IPV6_TRANSPORT_MASK 0x7fffU
 #define IPV6_TRANSPORT_BYPASS 0xffffffffU
 #define IPV6_TRANSPORT_DROP 0xfffffffeU
 
@@ -804,7 +805,7 @@ NOINLINE __u32 ipv6_transport_offset(
     __u8 protocol = ip->next_header;
     __u32 offset = l3_offset + sizeof(*ip);
 #pragma clang loop unroll(full)
-    for (__u32 depth = 0U; depth < 4U; ++depth) {
+    for (__u32 depth = 0U; depth < IPV6_MAX_EXTENSION_HEADERS; ++depth) {
         if (protocol == IPPROTO_TCP_VALUE || protocol == IPPROTO_UDP_VALUE) {
             *protocol_out = protocol;
             return offset;
@@ -832,7 +833,15 @@ NOINLINE __u32 ipv6_transport_offset(
             : ((__u32)extension->length + 1U) * 8U;
         if (data + offset > data_end) return IPV6_TRANSPORT_DROP;
     }
-    return IPV6_TRANSPORT_DROP;
+    if (protocol == IPPROTO_TCP_VALUE || protocol == IPPROTO_UDP_VALUE) {
+        *protocol_out = protocol;
+        return offset;
+    }
+    if (protocol == 0U || protocol == 43U || protocol == 44U ||
+        protocol == 51U || protocol == 60U) {
+        return IPV6_TRANSPORT_DROP;
+    }
+    return IPV6_TRANSPORT_BYPASS;
 }
 
 NOINLINE int ingress_ipv6(
@@ -847,7 +856,10 @@ NOINLINE int ingress_ipv6(
     if ((void *)(ip + 1) > data_end || (swap32(ip->version_flow) >> 28U) != 6U) return TC_ACT_PIPE;
     __u8 protocol = 0U;
     __u32 transport = ipv6_transport_offset(data, data_end, l3_offset, &protocol);
-    if (transport == IPV6_TRANSPORT_DROP) return TC_ACT_SHOT;
+    if (transport == IPV6_TRANSPORT_DROP) {
+        increment_stat(SB_SHARED_STAT_IPV6_TRANSPORT_PARSE_FAILED);
+        return TC_ACT_SHOT;
+    }
     if (transport == IPV6_TRANSPORT_BYPASS) return TC_ACT_PIPE;
     if (transport < IPV6_TRANSPORT_MIN_OFFSET || transport > IPV6_TRANSPORT_MAX_OFFSET) {
         return TC_ACT_SHOT;
@@ -912,6 +924,7 @@ NOINLINE int ingress_ipv6(
     protocol = 0U;
     transport = ipv6_transport_offset(data, data_end, l3_offset, &protocol);
     if (transport < IPV6_TRANSPORT_MIN_OFFSET || transport > IPV6_TRANSPORT_MAX_OFFSET) {
+        increment_stat(SB_SHARED_STAT_IPV6_TRANSPORT_PARSE_FAILED);
         return TC_ACT_SHOT;
     }
     transport &= IPV6_TRANSPORT_MASK;
@@ -953,6 +966,7 @@ NOINLINE int egress_ipv6(
     __u8 protocol = 0U;
     __u32 transport = ipv6_transport_offset(data, data_end, l3_offset, &protocol);
     if (transport < IPV6_TRANSPORT_MIN_OFFSET || transport > IPV6_TRANSPORT_MAX_OFFSET) {
+        increment_stat(SB_SHARED_STAT_IPV6_TRANSPORT_PARSE_FAILED);
         return TC_ACT_SHOT;
     }
     transport &= IPV6_TRANSPORT_MASK;
@@ -974,6 +988,7 @@ NOINLINE int egress_ipv6(
     protocol = 0U;
     transport = ipv6_transport_offset(data, data_end, l3_offset, &protocol);
     if (transport < IPV6_TRANSPORT_MIN_OFFSET || transport > IPV6_TRANSPORT_MAX_OFFSET) {
+        increment_stat(SB_SHARED_STAT_IPV6_TRANSPORT_PARSE_FAILED);
         return TC_ACT_SHOT;
     }
     transport &= IPV6_TRANSPORT_MASK;

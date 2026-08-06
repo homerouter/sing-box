@@ -303,6 +303,11 @@ metadata.
 IPv4 shared-network mode temporarily enables `route_localnet` on attached
 interfaces. IPv6 requires an IPv6 `/64` in `redirect_address`.
 
+The IPv6 parser accepts up to eight Hop-by-Hop, Routing, Destination Options,
+and Authentication extension headers. Fragmented traffic is dropped on the
+selected proxy path because later fragments do not contain transport ports
+required by token rewriting.
+
 The selected interface must expose Ethernet-like frames to TC. XDP, hardware
 flow offload, or vendor tethering offload that bypasses TC cannot be
 intercepted.

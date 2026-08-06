@@ -12,4 +12,5 @@ var sharedNetworkDiagnosticCounterNames = []string{
 	"bypass_cache_update_failed",
 	"packet_rewrite_failed",
 	"scratch_lookup_failed",
+	"ipv6_transport_parse_failed",
 }
