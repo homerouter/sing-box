@@ -337,8 +337,9 @@ The standalone script is also available at `common/ebpf/check-kernel.sh`.
 
 `BPF_CGROUP_INET_SOCK_RELEASE` is optional. Older kernels use a bounded LRU
 compatibility mode for UDP state. TGID self-bypass and map lookup-and-delete
-are optional performance optimizations. `CONFIG_BPF_JIT` is strongly
-recommended.
+are optional performance optimizations. Batch map operations accelerate large
+policy updates and cleanup when supported; older kernels use individual map
+operations. `CONFIG_BPF_JIT` is strongly recommended.
 
 There is no reliable kernel-version-only check because Android and vendor
 kernels frequently backport individual eBPF features. A successful program

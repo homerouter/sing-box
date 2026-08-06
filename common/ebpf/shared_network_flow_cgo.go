@@ -13,6 +13,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var sharedFlowDeleteBatchSupport mapBatchSupport
+
 func (b *SharedNetworkBackend) LookupOriginal(
 	protocol uint8,
 	client netip.AddrPort,
@@ -153,21 +155,23 @@ func (b *SharedNetworkBackend) ExpirePendingTCPFlows(maxAge time.Duration, limit
 		}
 	}
 
-	var cleanupErr error
-	var expired int
-	for _, flow := range staleFlows {
-		err := E.Errors(
-			deleteMapIfExists(int(b.runtime.original_to_token_map_fd), unsafe.Pointer(&flow.originalKey)),
-			deleteMapIfExists(int(b.runtime.listener_map_fd), unsafe.Pointer(&flow.listenerKey)),
-			deleteMapIfExists(int(b.runtime.reply_map_fd), unsafe.Pointer(&flow.replyKey)),
-		)
-		if err != nil {
-			cleanupErr = E.Errors(cleanupErr, err)
-			continue
-		}
-		expired++
+	originalKeys := make([]sharedNetworkOriginalKey, len(staleFlows))
+	listenerKeys := make([]sharedNetworkListenerKey, len(staleFlows))
+	replyKeys := make([]sharedNetworkReplyKey, len(staleFlows))
+	for index, flow := range staleFlows {
+		originalKeys[index] = flow.originalKey
+		listenerKeys[index] = flow.listenerKey
+		replyKeys[index] = flow.replyKey
 	}
-	return expired, cleanupErr
+	cleanupErr := E.Errors(
+		deleteMapKeysIfExist(int(b.runtime.original_to_token_map_fd), originalKeys),
+		deleteMapKeysIfExist(int(b.runtime.listener_map_fd), listenerKeys),
+		deleteMapKeysIfExist(int(b.runtime.reply_map_fd), replyKeys),
+	)
+	if cleanupErr != nil {
+		return 0, cleanupErr
+	}
+	return len(staleFlows), nil
 }
 
 func pendingTCPFlowExpired(createdAtNS uint64, now uint64, maxAgeNS uint64) bool {
@@ -200,4 +204,29 @@ func deleteMapIfExists(mapFD int, key unsafe.Pointer) error {
 		return nil
 	}
 	return err
+}
+
+func deleteMapKeysIfExist[T any](mapFD int, keys []T) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	processed, err := deleteMapBatch(
+		mapFD,
+		unsafe.Pointer(&keys[0]),
+		uint32(len(keys)),
+		unsafe.Sizeof(keys[0]),
+		&sharedFlowDeleteBatchSupport,
+	)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, unix.ENOENT) {
+		return err
+	}
+	for index := int(processed); index < len(keys); index++ {
+		if err = deleteMapIfExists(mapFD, unsafe.Pointer(&keys[index])); err != nil {
+			return err
+		}
+	}
+	return nil
 }

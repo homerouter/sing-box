@@ -309,8 +309,9 @@ sing-box tools ebpf status --mode shared-network --interface br-lan
 | `shared_network` | `sched_cls`、`clsact`、可写包和校验和 helper，以及 TC 管理权限。 |
 
 `BPF_CGROUP_INET_SOCK_RELEASE` 是可选能力，旧内核会对 UDP 状态使用有界 LRU
-兼容模式。TGID 自身绕过和 map lookup-and-delete 是可选性能优化。强烈建议启用
-`CONFIG_BPF_JIT`。
+兼容模式。TGID 自身绕过和 map lookup-and-delete 是可选性能优化。内核支持时，
+batch map 操作会加快大型策略更新和状态清理；旧内核会自动使用逐条
+map 操作。强烈建议启用 `CONFIG_BPF_JIT`。
 
 不能只根据内核版本判断兼容性，因为 Android 和厂商内核经常单独回移 eBPF 特性。
 目标内核能否成功加载程序才是最终判断标准。
